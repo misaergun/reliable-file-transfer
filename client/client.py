@@ -3,7 +3,7 @@ import socket
 import sys
 from pathlib import Path
 
-from common.protocol import send_message
+from common.protocol import send_message, receive_message
 
 
 HOST = "127.0.0.1"
@@ -66,6 +66,18 @@ def upload_file(file_path):
                 sock.sendall(chunk)
 
         print("Upload completed")
+
+        response = receive_message(sock)
+
+        if response.get("type") == "TRANSFER_OK":
+            print("Server verified the file successfully")
+
+        elif response.get("type") == "TRANSFER_FAILED":
+            print("Server rejected the file")
+            print(response.get("message"))
+
+        else:
+            print("Unexpected server response:", response)
 
     finally:
         sock.close()

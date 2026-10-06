@@ -2,7 +2,7 @@ import hashlib
 import socket
 from pathlib import Path
 
-from common.protocol import receive_message, receive_exact
+from common.protocol import send_message, receive_message, receive_exact
 
 
 HOST = "127.0.0.1"
@@ -66,8 +66,19 @@ try:
 
     if actual_hash == expected_hash:
         print("TRANSFER VERIFIED")
+
+        send_message(client_socket, {
+            "type": "TRANSFER_OK",
+            "message": "File received and verified successfully"
+        })
+
     else:
         print("TRANSFER FAILED: checksum mismatch")
+
+        send_message(client_socket, {
+            "type": "TRANSFER_FAILED",
+            "message": "Checksum mismatch"
+        })
 
 finally:
     client_socket.close()
