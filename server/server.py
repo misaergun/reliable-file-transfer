@@ -1,3 +1,4 @@
+import hashlib
 import socket
 from pathlib import Path
 
@@ -36,11 +37,15 @@ try:
 
     filename = Path(message["filename"]).name
     file_size = message["size"]
+    expected_hash = message["sha256"]
 
     output_path = RECEIVED_DIR / filename
 
     print(f"Receiving file: {filename}")
     print(f"File size: {file_size} bytes")
+    print(f"Expected SHA-256: {expected_hash}")
+
+    sha256 = hashlib.sha256()
 
     remaining = file_size
 
@@ -51,10 +56,18 @@ try:
             chunk = receive_exact(client_socket, chunk_size)
 
             file.write(chunk)
+            sha256.update(chunk)
 
             remaining -= len(chunk)
 
-    print(f"File received successfully: {output_path}")
+    actual_hash = sha256.hexdigest()
+
+    print(f"Actual SHA-256: {actual_hash}")
+
+    if actual_hash == expected_hash:
+        print("TRANSFER VERIFIED")
+    else:
+        print("TRANSFER FAILED: checksum mismatch")
 
 finally:
     client_socket.close()

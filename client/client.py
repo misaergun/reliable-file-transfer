@@ -1,3 +1,4 @@
+import hashlib
 import socket
 import sys
 from pathlib import Path
@@ -11,6 +12,21 @@ PORT = 5050
 BUFFER_SIZE = 64 * 1024
 
 
+def calculate_sha256(file_path):
+    sha256 = hashlib.sha256()
+
+    with file_path.open("rb") as file:
+        while True:
+            chunk = file.read(BUFFER_SIZE)
+
+            if not chunk:
+                break
+
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
+
+
 def upload_file(file_path):
     file_path = Path(file_path)
 
@@ -18,6 +34,7 @@ def upload_file(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
     file_size = file_path.stat().st_size
+    file_hash = calculate_sha256(file_path)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -30,12 +47,14 @@ def upload_file(file_path):
             "type": "UPLOAD",
             "filename": file_path.name,
             "size": file_size,
+            "sha256": file_hash,
         }
 
         send_message(sock, message)
 
         print(f"Uploading: {file_path.name}")
         print(f"Size: {file_size} bytes")
+        print(f"SHA-256: {file_hash}")
 
         with file_path.open("rb") as file:
             while True:
@@ -54,7 +73,7 @@ def upload_file(file_path):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python3 client/client.py <file>")
+        print("Usage: python3 -m client.client <file>")
         sys.exit(1)
 
     upload_file(sys.argv[1])
