@@ -412,15 +412,17 @@ def download_file(filename):
             )
             return
 
-        print(f"Downloading: {filename}")
-
+        filename = response["filename"]
         file_size = response["size"]
         expected_hash = response["sha256"]
 
         output_path = DOWNLOAD_DIR / filename
+        partial_path = DOWNLOAD_DIR / f"{filename}.part"
 
+        print(f"Downloading: {filename}")
         print(f"Size: {format_bytes(file_size)}")
         print(f"SHA-256: {expected_hash}")
+        print(f"Temporary file: {partial_path}")
 
         sha256 = hashlib.sha256()
 
@@ -429,7 +431,7 @@ def download_file(filename):
 
         start_time = time.monotonic()
 
-        with output_path.open("wb") as file:
+        with partial_path.open("wb") as file:
             while remaining > 0:
                 chunk_size = min(
                     BUFFER_SIZE,
@@ -484,7 +486,12 @@ def download_file(filename):
         )
 
         if actual_hash == expected_hash:
+            partial_path.replace(output_path)
+
             print("DOWNLOAD VERIFIED")
+            print(
+                f"File saved to: {output_path}"
+            )
 
             send_message(sock, {
                 "type": "DOWNLOAD_VERIFIED"
@@ -500,6 +507,23 @@ def download_file(filename):
                 "type": "DOWNLOAD_FAILED",
                 "message": "Checksum mismatch",
             })
+
+    except (
+        ConnectionError,
+        BrokenPipeError,
+        ConnectionResetError,
+        socket.timeout,
+        OSError,
+    ):
+        print()
+        print(
+            "Download interrupted. "
+            "Partial file was preserved:"
+        )
+        print(
+            f"  {DOWNLOAD_DIR / f'{filename}.part'}"
+        )
+        raise
 
     finally:
         sock.close()
@@ -547,7 +571,16 @@ if __name__ == "__main__":
         command == "download"
         and len(sys.argv) == 3
     ):
-        download_file(sys.argv[2])
+        try:
+            download_file(sys.argv[2])
+        except (
+            ConnectionError,
+            BrokenPipeError,
+            ConnectionResetError,
+            socket.timeout,
+            OSError,
+        ):
+            sys.exit(1)
 
     else:
         print(
