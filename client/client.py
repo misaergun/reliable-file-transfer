@@ -26,6 +26,18 @@ DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 
+def create_connection():
+    sock = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM
+    )
+
+    sock.settimeout(SOCKET_TIMEOUT)
+    sock.connect((HOST, PORT))
+
+    return sock
+
+
 def calculate_sha256(file_path):
     sha256 = hashlib.sha256()
 
@@ -103,16 +115,9 @@ def upload_attempt(
     attempt_number,
     test_interrupt_bytes=None,
 ):
-    sock = socket.socket(
-        socket.AF_INET,
-        socket.SOCK_STREAM
-    )
-
-    sock.settimeout(SOCKET_TIMEOUT)
+    sock = create_connection()
 
     try:
-        sock.connect((HOST, PORT))
-
         print(
             f"Connected to {HOST}:{PORT} "
             f"(attempt {attempt_number})"
@@ -377,16 +382,9 @@ def upload_file(file_path, test_interrupt_mb=None):
 def download_file(filename):
     filename = Path(filename).name
 
-    sock = socket.socket(
-        socket.AF_INET,
-        socket.SOCK_STREAM
-    )
-
-    sock.settimeout(SOCKET_TIMEOUT)
+    sock = create_connection()
 
     try:
-        sock.connect((HOST, PORT))
-
         print(f"Connected to {HOST}:{PORT}")
 
         message = {
