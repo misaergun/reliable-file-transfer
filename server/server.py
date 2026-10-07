@@ -14,27 +14,22 @@ RECEIVED_DIR = Path("received_files")
 RECEIVED_DIR.mkdir(exist_ok=True)
 
 
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def calculate_sha256(file_path):
+    sha256 = hashlib.sha256()
 
-server_socket.bind((HOST, PORT))
-server_socket.listen(1)
+    with file_path.open("rb") as file:
+        while True:
+            chunk = file.read(BUFFER_SIZE)
 
-print(f"Server listening on {HOST}:{PORT}")
+            if not chunk:
+                break
+
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
 
 
-client_socket, client_address = server_socket.accept()
-
-print(f"Client connected: {client_address}")
-
-
-try:
-    message = receive_message(client_socket)
-
-    print(f"Received message: {message}")
-
-    if message.get("type") != "UPLOAD":
-        raise ValueError("Unsupported message type")
-
+def handle_upload(client_socket, message):
     filename = Path(message["filename"]).name
     file_size = message["size"]
     expected_hash = message["sha256"]
@@ -80,6 +75,91 @@ try:
             "message": "Checksum mismatch"
         })
 
-finally:
-    client_socket.close()
-    server_socket.close()
+
+def handle_download(client_socket, message):
+    filename = Path(message["filename"]).name
+    file_path = RECEIVED_DIR / filename
+
+    print(f"Download requested: {filename}")
+
+    if not file_path.is_file():
+        print("File not found")
+
+        send_message(client_socket, {
+            "type": "DOWNLOAD_FAILED",
+            "message": "File not found"
+        })
+
+        return
+
+    file_size = file_path.stat().st_size
+    file_hash = calculate_sha256(file_path)
+
+    send_message(client_socket, {
+        "type": "DOWNLOAD_READY",
+        "filename": filename,
+        "size": file_size,
+        "sha256": file_hash
+    })
+
+    print(f"Sending file: {filename}")
+    print(f"File size: {file_size} bytes")
+    print(f"SHA-256: {file_hash}")
+
+    with file_path.open("rb") as file:
+        while True:
+            chunk = file.read(BUFFER_SIZE)
+
+            if not chunk:
+                break
+
+            client_socket.sendall(chunk)
+
+    print("Download transfer completed")
+
+    response = receive_message(client_socket)
+
+    if response.get("type") == "DOWNLOAD_VERIFIED":
+        print("Client verified the file successfully")
+    else:
+        print("Client reported a verification failure")
+
+
+def start_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    server_socket.bind((HOST, PORT))
+    server_socket.listen(1)
+
+    print(f"Server listening on {HOST}:{PORT}")
+
+    client_socket, client_address = server_socket.accept()
+
+    print(f"Client connected: {client_address}")
+
+    try:
+        message = receive_message(client_socket)
+
+        print(f"Received message: {message}")
+
+        message_type = message.get("type")
+
+        if message_type == "UPLOAD":
+            handle_upload(client_socket, message)
+
+        elif message_type == "DOWNLOAD":
+            handle_download(client_socket, message)
+
+        else:
+            send_message(client_socket, {
+                "type": "ERROR",
+                "message": "Unsupported operation"
+            })
+
+    finally:
+        client_socket.close()
+        server_socket.close()
+
+
+if __name__ == "__main__":
+    start_server()

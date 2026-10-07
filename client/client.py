@@ -4,13 +4,16 @@ import sys
 import time
 from pathlib import Path
 
-from common.protocol import send_message, receive_message
+from common.protocol import send_message, receive_message, receive_exact
 
 
 HOST = "127.0.0.1"
 PORT = 5050
 
 BUFFER_SIZE = 64 * 1024
+
+DOWNLOAD_DIR = Path("downloads")
+DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 
 def calculate_sha256(file_path):
@@ -86,11 +89,7 @@ def upload_file(file_path):
 
                 elapsed = time.monotonic() - start_time
 
-                if elapsed > 0:
-                    speed = bytes_sent / elapsed
-                else:
-                    speed = 0
-
+                speed = bytes_sent / elapsed if elapsed > 0 else 0
                 percentage = (bytes_sent / file_size) * 100
 
                 print(
@@ -126,9 +125,131 @@ def upload_file(file_path):
         sock.close()
 
 
+def download_file(filename):
+    filename = Path(filename).name
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    try:
+        sock.connect((HOST, PORT))
+
+        print(f"Connected to {HOST}:{PORT}")
+
+        message = {
+            "type": "DOWNLOAD",
+            "filename": filename,
+        }
+
+        send_message(sock, message)
+
+        response = receive_message(sock)
+
+        if response.get("type") == "DOWNLOAD_FAILED":
+            print("Download failed")
+            print(response.get("message"))
+            return
+
+        if response.get("type") != "DOWNLOAD_READY":
+            print("Unexpected server response:", response)
+            return
+
+        file_size = response["size"]
+        expected_hash = response["sha256"]
+
+        output_path = DOWNLOAD_DIR / filename
+
+        print(f"Downloading: {filename}")
+        print(f"Size: {format_bytes(file_size)}")
+        print(f"SHA-256: {expected_hash}")
+
+        sha256 = hashlib.sha256()
+
+        remaining = file_size
+        bytes_received = 0
+
+        start_time = time.monotonic()
+
+        with output_path.open("wb") as file:
+            while remaining > 0:
+                chunk_size = min(BUFFER_SIZE, remaining)
+
+                chunk = receive_exact(sock, chunk_size)
+
+                file.write(chunk)
+                sha256.update(chunk)
+
+                remaining -= len(chunk)
+                bytes_received += len(chunk)
+
+                elapsed = time.monotonic() - start_time
+
+                speed = (
+                    bytes_received / elapsed
+                    if elapsed > 0
+                    else 0
+                )
+
+                percentage = (
+                    bytes_received / file_size
+                ) * 100
+
+                print(
+                    f"\rProgress: {percentage:6.2f}% | "
+                    f"{format_bytes(bytes_received)} / "
+                    f"{format_bytes(file_size)} | "
+                    f"Speed: {format_bytes(speed)}/s",
+                    end="",
+                    flush=True,
+                )
+
+        elapsed = time.monotonic() - start_time
+
+        actual_hash = sha256.hexdigest()
+
+        print()
+        print(f"Download completed in {elapsed:.2f}s")
+        print(f"Actual SHA-256: {actual_hash}")
+
+        if actual_hash == expected_hash:
+            print("DOWNLOAD VERIFIED")
+
+            send_message(sock, {
+                "type": "DOWNLOAD_VERIFIED"
+            })
+
+        else:
+            print("DOWNLOAD FAILED: checksum mismatch")
+
+            send_message(sock, {
+                "type": "DOWNLOAD_FAILED",
+                "message": "Checksum mismatch"
+            })
+
+    finally:
+        sock.close()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python3 -m client.client <file>")
+    if len(sys.argv) < 2:
+        print(
+            "Usage:\n"
+            "  python3 -m client.client upload <file>\n"
+            "  python3 -m client.client download <file>"
+        )
         sys.exit(1)
 
-    upload_file(sys.argv[1])
+    command = sys.argv[1]
+
+    if command == "upload" and len(sys.argv) == 3:
+        upload_file(sys.argv[2])
+
+    elif command == "download" and len(sys.argv) == 3:
+        download_file(sys.argv[2])
+
+    else:
+        print(
+            "Usage:\n"
+            "  python3 -m client.client upload <file>\n"
+            "  python3 -m client.client download <file>"
+        )
+        sys.exit(1)
