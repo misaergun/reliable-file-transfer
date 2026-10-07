@@ -1,6 +1,7 @@
 import hashlib
 import socket
 import sys
+import time
 from pathlib import Path
 
 from common.protocol import send_message, receive_message
@@ -25,6 +26,19 @@ def calculate_sha256(file_path):
             sha256.update(chunk)
 
     return sha256.hexdigest()
+
+
+def format_bytes(size):
+    if size < 1024:
+        return f"{size} B"
+
+    if size < 1024 ** 2:
+        return f"{size / 1024:.1f} KB"
+
+    if size < 1024 ** 3:
+        return f"{size / (1024 ** 2):.1f} MB"
+
+    return f"{size / (1024 ** 3):.1f} GB"
 
 
 def upload_file(file_path):
@@ -53,8 +67,11 @@ def upload_file(file_path):
         send_message(sock, message)
 
         print(f"Uploading: {file_path.name}")
-        print(f"Size: {file_size} bytes")
+        print(f"Size: {format_bytes(file_size)}")
         print(f"SHA-256: {file_hash}")
+
+        bytes_sent = 0
+        start_time = time.monotonic()
 
         with file_path.open("rb") as file:
             while True:
@@ -65,7 +82,33 @@ def upload_file(file_path):
 
                 sock.sendall(chunk)
 
-        print("Upload completed")
+                bytes_sent += len(chunk)
+
+                elapsed = time.monotonic() - start_time
+
+                if elapsed > 0:
+                    speed = bytes_sent / elapsed
+                else:
+                    speed = 0
+
+                percentage = (bytes_sent / file_size) * 100
+
+                print(
+                    f"\rProgress: {percentage:6.2f}% | "
+                    f"{format_bytes(bytes_sent)} / {format_bytes(file_size)} | "
+                    f"Speed: {format_bytes(speed)}/s",
+                    end="",
+                    flush=True,
+                )
+
+        elapsed = time.monotonic() - start_time
+
+        print()
+        print(f"Upload completed in {elapsed:.2f}s")
+
+        if elapsed > 0:
+            average_speed = bytes_sent / elapsed
+            print(f"Average speed: {format_bytes(average_speed)}/s")
 
         response = receive_message(sock)
 
