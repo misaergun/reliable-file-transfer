@@ -365,7 +365,12 @@ def handle_upload(client_socket, message):
 
         remaining = file_size - offset
 
-        # Append new data to the partial file.
+        # Append incoming data to the partial file.
+        #
+        # IMPORTANT:
+        # Each received chunk is written immediately.
+        # This allows interrupted uploads to preserve
+        # all data that has already arrived.
         with partial_path.open("ab") as file:
             while remaining > 0:
                 chunk_size = min(
@@ -373,15 +378,27 @@ def handle_upload(client_socket, message):
                     remaining
                 )
 
-                chunk = receive_exact(
-                    client_socket,
-                    chunk_size
-                )
+                chunk = client_socket.recv(chunk_size)
+
+                if not chunk:
+                    raise ConnectionError(
+                        "Connection closed during upload"
+                    )
 
                 file.write(chunk)
+
+                # Flush the Python file buffer so the partial
+                # file size reflects received data immediately.
+                file.flush()
+
                 sha256.update(chunk)
 
                 remaining -= len(chunk)
+
+                print(
+                    f"Received {len(chunk)} bytes | "
+                    f"{file_size - remaining} / {file_size} bytes"
+                )
 
         actual_hash = sha256.hexdigest()
 
