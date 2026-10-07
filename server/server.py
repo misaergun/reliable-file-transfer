@@ -1,10 +1,11 @@
 import hashlib
 import json
+import logging
 import socket
 import threading
 from pathlib import Path
 
-from common.protocol import send_message, receive_message, receive_exact
+from common.protocol import send_message, receive_message
 
 
 HOST = "127.0.0.1"
@@ -16,6 +17,8 @@ SOCKET_TIMEOUT = 30
 
 RECEIVED_DIR = Path("received_files")
 RECEIVED_DIR.mkdir(exist_ok=True)
+
+logger = logging.getLogger(__name__)
 
 # Each filename gets its own lock.
 # This prevents two clients from modifying the same
@@ -113,6 +116,11 @@ def load_partial_metadata(metadata_path):
             return json.load(file)
 
     except (json.JSONDecodeError, OSError):
+        logger.warning(
+            "Could not read partial metadata: %s",
+            metadata_path
+        )
+
         return None
 
 
@@ -170,8 +178,9 @@ def handle_upload(client_socket, message):
     valid, error_message = validate_upload_message(message)
 
     if not valid:
-        print(
-            f"Invalid upload request: {error_message}"
+        logger.warning(
+            "Invalid upload request: %s",
+            error_message
         )
 
         send_message(client_socket, {
@@ -191,14 +200,18 @@ def handle_upload(client_socket, message):
 
     file_lock = get_file_lock(filename)
 
-    print(f"Upload requested: {filename}")
+    logger.info(
+        "Upload requested: %s",
+        filename
+    )
 
     # Only one client can upload this specific filename at a time.
     acquired = file_lock.acquire(blocking=False)
 
     if not acquired:
-        print(
-            f"Upload already in progress for: {filename}"
+        logger.warning(
+            "Upload already in progress for: %s",
+            filename
         )
 
         send_message(client_socket, {
@@ -212,8 +225,15 @@ def handle_upload(client_socket, message):
         return
 
     try:
-        print(f"File size: {file_size} bytes")
-        print(f"Expected SHA-256: {expected_hash}")
+        logger.info(
+            "Upload size: %s bytes",
+            file_size
+        )
+
+        logger.info(
+            "Expected SHA-256: %s",
+            expected_hash
+        )
 
         # Check whether a partial upload already exists.
         if partial_path.is_file():
@@ -229,14 +249,16 @@ def handle_upload(client_socket, message):
                 file_size,
                 expected_hash
             ):
-                print(
+                logger.warning(
                     "Partial file metadata does not "
-                    "match this upload"
+                    "match this upload: %s",
+                    filename
                 )
 
-                print(
+                logger.warning(
                     "Discarding stale or invalid "
-                    "partial file"
+                    "partial file: %s",
+                    filename
                 )
 
                 remove_partial_files(
@@ -249,29 +271,38 @@ def handle_upload(client_socket, message):
             elif current_size < file_size:
                 offset = current_size
 
-                print(
-                    f"Partial file found: "
-                    f"{offset} bytes already received"
+                logger.info(
+                    "Partial file found: %s bytes "
+                    "already received: %s",
+                    offset,
+                    filename
                 )
 
-                print(
-                    f"Resuming from byte {offset}"
+                logger.info(
+                    "Resuming from byte %s: %s",
+                    offset,
+                    filename
                 )
 
             elif current_size == file_size:
                 offset = current_size
 
-                print(
+                logger.info(
                     "Partial file already contains "
-                    "the complete file"
+                    "the complete file: %s",
+                    filename
                 )
 
             else:
-                print(
-                    "Partial file is larger than expected"
+                logger.warning(
+                    "Partial file is larger than expected: %s",
+                    filename
                 )
 
-                print("Discarding partial file")
+                logger.warning(
+                    "Discarding partial file: %s",
+                    filename
+                )
 
                 remove_partial_files(
                     partial_path,
@@ -284,13 +315,15 @@ def handle_upload(client_socket, message):
             # A metadata file without its corresponding
             # partial file is stale and should not be used.
             if metadata_path.exists():
-                print(
+                logger.warning(
                     "Partial metadata exists without "
-                    "a partial file"
+                    "a partial file: %s",
+                    filename
                 )
 
-                print(
-                    "Removing stale partial metadata"
+                logger.warning(
+                    "Removing stale partial metadata: %s",
+                    filename
                 )
 
                 metadata_path.unlink()
@@ -308,9 +341,10 @@ def handle_upload(client_socket, message):
                 )
 
                 if existing_hash == expected_hash:
-                    print(
-                        "File already exists and "
-                        "matches expected SHA-256"
+                    logger.info(
+                        "File already exists and matches "
+                        "expected SHA-256: %s",
+                        filename
                     )
 
                     send_message(client_socket, {
@@ -323,14 +357,16 @@ def handle_upload(client_socket, message):
 
                     return
 
-                print(
+                logger.warning(
                     "Existing file has a different "
-                    "SHA-256"
+                    "SHA-256: %s",
+                    filename
                 )
 
-            print(
-                "Existing file will be replaced "
-                "after successful verification"
+            logger.info(
+                "Existing file will be replaced after "
+                "successful verification: %s",
+                filename
             )
 
         # If starting a new upload, save metadata before
@@ -406,17 +442,26 @@ def handle_upload(client_socket, message):
 
                 remaining -= len(chunk)
 
-                print(
-                    f"Received {len(chunk)} bytes | "
-                    f"{file_size - remaining} / {file_size} bytes"
+                logger.info(
+                    "Received %s bytes | %s / %s bytes | %s",
+                    len(chunk),
+                    file_size - remaining,
+                    file_size,
+                    filename
                 )
 
         actual_hash = sha256.hexdigest()
 
-        print(f"Actual SHA-256: {actual_hash}")
+        logger.info(
+            "Actual SHA-256: %s",
+            actual_hash
+        )
 
         if actual_hash == expected_hash:
-            print("TRANSFER VERIFIED")
+            logger.info(
+                "TRANSFER VERIFIED: %s",
+                filename
+            )
 
             # Replace the final file only after
             # successful verification.
@@ -435,8 +480,9 @@ def handle_upload(client_socket, message):
             })
 
         else:
-            print(
-                "TRANSFER FAILED: checksum mismatch"
+            logger.error(
+                "TRANSFER FAILED: checksum mismatch: %s",
+                filename
             )
 
             send_message(client_socket, {
@@ -450,6 +496,10 @@ def handle_upload(client_socket, message):
 
 def handle_download(client_socket, message):
     if not isinstance(message, dict):
+        logger.warning(
+            "Invalid download request: message is not an object"
+        )
+
         send_message(client_socket, {
             "type": "DOWNLOAD_FAILED",
             "message": "Download request must be a JSON object"
@@ -464,6 +514,11 @@ def handle_download(client_socket, message):
     )
 
     if not valid_filename:
+        logger.warning(
+            "Invalid download filename: %s",
+            error_message
+        )
+
         send_message(client_socket, {
             "type": "DOWNLOAD_FAILED",
             "message": error_message
@@ -474,10 +529,16 @@ def handle_download(client_socket, message):
     filename = Path(filename).name
     file_path = RECEIVED_DIR / filename
 
-    print(f"Download requested: {filename}")
+    logger.info(
+        "Download requested: %s",
+        filename
+    )
 
     if not file_path.is_file():
-        print("File not found")
+        logger.warning(
+            "File not found: %s",
+            filename
+        )
 
         send_message(client_socket, {
             "type": "DOWNLOAD_FAILED",
@@ -496,9 +557,20 @@ def handle_download(client_socket, message):
         "sha256": file_hash
     })
 
-    print(f"Sending file: {filename}")
-    print(f"File size: {file_size} bytes")
-    print(f"SHA-256: {file_hash}")
+    logger.info(
+        "Sending file: %s",
+        filename
+    )
+
+    logger.info(
+        "File size: %s bytes",
+        file_size
+    )
+
+    logger.info(
+        "SHA-256: %s",
+        file_hash
+    )
 
     with file_path.open("rb") as file:
         while True:
@@ -509,18 +581,31 @@ def handle_download(client_socket, message):
 
             client_socket.sendall(chunk)
 
-    print("Download transfer completed")
+    logger.info(
+        "Download transfer completed: %s",
+        filename
+    )
 
     response = receive_message(client_socket)
 
     if response.get("type") == "DOWNLOAD_VERIFIED":
-        print("Client verified the file successfully")
+        logger.info(
+            "Client verified the file successfully: %s",
+            filename
+        )
+
     else:
-        print("Client reported a verification failure")
+        logger.warning(
+            "Client reported a verification failure: %s",
+            filename
+        )
 
 
 def handle_client(client_socket, client_address):
-    print(f"Client connected: {client_address}")
+    logger.info(
+        "Client connected: %s",
+        client_address
+    )
 
     # Prevent a client from keeping a connection open
     # indefinitely without sending or receiving data.
@@ -529,7 +614,11 @@ def handle_client(client_socket, client_address):
     try:
         message = receive_message(client_socket)
 
-        print(f"Received message: {message}")
+        logger.info(
+            "Received message from %s: %s",
+            client_address,
+            message
+        )
 
         message_type = message.get("type")
 
@@ -540,28 +629,36 @@ def handle_client(client_socket, client_address):
             handle_download(client_socket, message)
 
         else:
+            logger.warning(
+                "Unsupported operation from %s: %s",
+                client_address,
+                message_type
+            )
+
             send_message(client_socket, {
                 "type": "ERROR",
                 "message": "Unsupported operation"
             })
 
     except socket.timeout:
-        print(
-            f"Client timed out after "
-            f"{SOCKET_TIMEOUT} seconds: "
-            f"{client_address}"
+        logger.warning(
+            "Client timed out after %s seconds: %s",
+            SOCKET_TIMEOUT,
+            client_address
         )
 
     except Exception as error:
-        print(
-            f"Client error ({client_address}): {error}"
+        logger.exception(
+            "Client error (%s)",
+            client_address
         )
 
     finally:
         client_socket.close()
 
-        print(
-            f"Client disconnected: {client_address}"
+        logger.info(
+            "Client disconnected: %s",
+            client_address
         )
 
 
@@ -580,8 +677,10 @@ def start_server():
     server_socket.bind((HOST, PORT))
     server_socket.listen()
 
-    print(
-        f"Server listening on {HOST}:{PORT}"
+    logger.info(
+        "Server listening on %s:%s",
+        HOST,
+        PORT
     )
 
     try:
@@ -602,11 +701,17 @@ def start_server():
             client_thread.start()
 
     except KeyboardInterrupt:
-        print("\nServer shutting down...")
+        logger.info("Server shutting down...")
 
     finally:
         server_socket.close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     start_server()

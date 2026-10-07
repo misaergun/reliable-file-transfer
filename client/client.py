@@ -49,6 +49,47 @@ def format_bytes(size):
     return f"{size / (1024 ** 3):.1f} GB"
 
 
+def validate_download_response(response):
+    if not isinstance(response, dict):
+        return False, "Response must be a JSON object"
+
+    response_type = response.get("type")
+
+    if response_type is None:
+        return False, "Response type is missing"
+
+    if response_type != "DOWNLOAD_READY":
+        return False, f"Unexpected response type: {response_type}"
+
+    filename = response.get("filename")
+
+    if not isinstance(filename, str) or not filename.strip():
+        return False, "Filename must be a non-empty string"
+
+    file_size = response.get("size")
+    expected_hash = response.get("sha256")
+
+    if not isinstance(file_size, int) or isinstance(file_size, bool):
+        return False, "File size must be a non-negative integer"
+
+    if file_size < 0:
+        return False, "File size must be a non-negative integer"
+
+    if not isinstance(expected_hash, str):
+        return False, "SHA-256 must be a string"
+
+    if len(expected_hash) != 64:
+        return False, "SHA-256 must contain exactly 64 characters"
+
+    if any(
+        character not in "0123456789abcdefABCDEF"
+        for character in expected_hash
+    ):
+        return False, "SHA-256 contains invalid hexadecimal characters"
+
+    return True, None
+
+
 def upload_attempt(
     file_path,
     file_size,
@@ -82,8 +123,6 @@ def upload_attempt(
 
         response = receive_message(sock)
 
-        # The server may report that the file already exists
-        # and is already verified.
         if response.get("type") == "TRANSFER_OK":
             print(
                 "Server reports that the file "
@@ -358,16 +397,24 @@ def download_file(filename):
             print(response.get("message"))
             return
 
-        if response.get("type") != "DOWNLOAD_READY":
-            print("Unexpected server response:", response)
+        valid, error_message = validate_download_response(
+            response
+        )
+
+        if not valid:
+            print(
+                "Invalid server response:",
+                error_message
+            )
             return
+
+        print(f"Downloading: {filename}")
 
         file_size = response["size"]
         expected_hash = response["sha256"]
 
         output_path = DOWNLOAD_DIR / filename
 
-        print(f"Downloading: {filename}")
         print(f"Size: {format_bytes(file_size)}")
         print(f"SHA-256: {expected_hash}")
 
