@@ -6,6 +6,11 @@ import threading
 from pathlib import Path
 
 from common.protocol import send_message, receive_message
+from common.validation import (
+    validate_filename,
+    validate_file_size,
+    validate_sha256,
+)
 
 
 HOST = "127.0.0.1"
@@ -50,24 +55,6 @@ def calculate_sha256(file_path):
     return sha256.hexdigest()
 
 
-def validate_filename(filename):
-    if not isinstance(filename, str):
-        return False, "Filename must be a string"
-
-    filename = filename.strip()
-
-    if not filename:
-        return False, "Filename cannot be empty"
-
-    if filename in {".", ".."}:
-        return False, "Invalid filename"
-
-    if Path(filename).name != filename:
-        return False, "Path separators are not allowed in filename"
-
-    return True, None
-
-
 def validate_upload_message(message):
     if not isinstance(message, dict):
         return False, "Upload request must be a JSON object"
@@ -83,23 +70,19 @@ def validate_upload_message(message):
     if not valid_filename:
         return False, filename_error
 
-    if not isinstance(file_size, int) or isinstance(file_size, bool):
-        return False, "File size must be a non-negative integer"
+    valid_size, size_error = validate_file_size(
+        file_size
+    )
 
-    if file_size < 0:
-        return False, "File size cannot be negative"
+    if not valid_size:
+        return False, size_error
 
-    if not isinstance(expected_hash, str):
-        return False, "SHA-256 must be a string"
+    valid_hash, hash_error = validate_sha256(
+        expected_hash
+    )
 
-    if len(expected_hash) != 64:
-        return False, "SHA-256 must contain exactly 64 characters"
-
-    if any(
-        character not in "0123456789abcdefABCDEF"
-        for character in expected_hash
-    ):
-        return False, "SHA-256 contains invalid hexadecimal characters"
+    if not valid_hash:
+        return False, hash_error
 
     return True, None
 
@@ -414,7 +397,6 @@ def handle_upload(client_socket, message):
 
         # Append incoming data to the partial file.
         #
-        # IMPORTANT:
         # Each received chunk is written immediately.
         # This allows interrupted uploads to preserve
         # all data that has already arrived.
@@ -607,8 +589,6 @@ def handle_client(client_socket, client_address):
         client_address
     )
 
-    # Prevent a client from keeping a connection open
-    # indefinitely without sending or receiving data.
     client_socket.settimeout(SOCKET_TIMEOUT)
 
     try:
@@ -647,7 +627,7 @@ def handle_client(client_socket, client_address):
             client_address
         )
 
-    except Exception as error:
+    except Exception:
         logger.exception(
             "Client error (%s)",
             client_address

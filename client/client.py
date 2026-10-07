@@ -5,6 +5,11 @@ import time
 from pathlib import Path
 
 from common.protocol import send_message, receive_message, receive_exact
+from common.validation import (
+    validate_filename,
+    validate_file_size,
+    validate_sha256,
+)
 
 
 HOST = "127.0.0.1"
@@ -63,29 +68,30 @@ def validate_download_response(response):
 
     filename = response.get("filename")
 
-    if not isinstance(filename, str) or not filename.strip():
+    valid_filename, filename_error = validate_filename(
+        filename
+    )
+
+    if not valid_filename:
         return False, "Filename must be a non-empty string"
 
     file_size = response.get("size")
+
+    valid_size, size_error = validate_file_size(
+        file_size
+    )
+
+    if not valid_size:
+        return False, "File size must be a non-negative integer"
+
     expected_hash = response.get("sha256")
 
-    if not isinstance(file_size, int) or isinstance(file_size, bool):
-        return False, "File size must be a non-negative integer"
+    valid_hash, hash_error = validate_sha256(
+        expected_hash
+    )
 
-    if file_size < 0:
-        return False, "File size must be a non-negative integer"
-
-    if not isinstance(expected_hash, str):
-        return False, "SHA-256 must be a string"
-
-    if len(expected_hash) != 64:
-        return False, "SHA-256 must contain exactly 64 characters"
-
-    if any(
-        character not in "0123456789abcdefABCDEF"
-        for character in expected_hash
-    ):
-        return False, "SHA-256 contains invalid hexadecimal characters"
+    if not valid_hash:
+        return False, hash_error
 
     return True, None
 
