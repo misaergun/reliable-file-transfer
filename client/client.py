@@ -12,6 +12,8 @@ PORT = 5050
 
 BUFFER_SIZE = 64 * 1024
 
+SOCKET_TIMEOUT = 30
+
 MAX_RETRIES = 3
 RETRY_DELAY = 2
 
@@ -54,7 +56,12 @@ def upload_attempt(
     attempt_number,
     test_interrupt_bytes=None,
 ):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM
+    )
+
+    sock.settimeout(SOCKET_TIMEOUT)
 
     try:
         sock.connect((HOST, PORT))
@@ -74,6 +81,15 @@ def upload_attempt(
         send_message(sock, message)
 
         response = receive_message(sock)
+
+        # The server may report that the file already exists
+        # and is already verified.
+        if response.get("type") == "TRANSFER_OK":
+            print(
+                "Server reports that the file "
+                "is already verified"
+            )
+            return True
 
         if response.get("type") != "UPLOAD_READY":
             raise RuntimeError(
@@ -285,6 +301,7 @@ def upload_file(file_path, test_interrupt_mb=None):
             ConnectionError,
             BrokenPipeError,
             ConnectionResetError,
+            socket.timeout,
             OSError,
         ) as error:
             print()
@@ -315,7 +332,12 @@ def upload_file(file_path, test_interrupt_mb=None):
 def download_file(filename):
     filename = Path(filename).name
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM
+    )
+
+    sock.settimeout(SOCKET_TIMEOUT)
 
     try:
         sock.connect((HOST, PORT))

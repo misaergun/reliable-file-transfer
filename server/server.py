@@ -12,6 +12,8 @@ PORT = 5050
 
 BUFFER_SIZE = 64 * 1024
 
+SOCKET_TIMEOUT = 30
+
 RECEIVED_DIR = Path("received_files")
 RECEIVED_DIR.mkdir(exist_ok=True)
 
@@ -470,6 +472,10 @@ def handle_download(client_socket, message):
 def handle_client(client_socket, client_address):
     print(f"Client connected: {client_address}")
 
+    # Prevent a client from keeping a connection open
+    # indefinitely without sending or receiving data.
+    client_socket.settimeout(SOCKET_TIMEOUT)
+
     try:
         message = receive_message(client_socket)
 
@@ -488,6 +494,13 @@ def handle_client(client_socket, client_address):
                 "type": "ERROR",
                 "message": "Unsupported operation"
             })
+
+    except socket.timeout:
+        print(
+            f"Client timed out after "
+            f"{SOCKET_TIMEOUT} seconds: "
+            f"{client_address}"
+        )
 
     except Exception as error:
         print(
