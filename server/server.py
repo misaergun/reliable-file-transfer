@@ -36,16 +36,68 @@ def handle_upload(client_socket, message):
     expected_hash = message["sha256"]
 
     output_path = RECEIVED_DIR / filename
+    partial_path = RECEIVED_DIR / f"{filename}.part"
 
-    print(f"Receiving file: {filename}")
+    print(f"Upload requested: {filename}")
     print(f"File size: {file_size} bytes")
     print(f"Expected SHA-256: {expected_hash}")
 
+    # Check whether a partial upload already exists.
+    if partial_path.is_file():
+        current_size = partial_path.stat().st_size
+
+        if current_size < file_size:
+            offset = current_size
+
+            print(f"Partial file found: {offset} bytes already received")
+            print(f"Resuming from byte {offset}")
+
+        elif current_size == file_size:
+            offset = current_size
+
+            print("Partial file already contains the complete file")
+
+        else:
+            print("Partial file is larger than expected")
+            print("Discarding partial file")
+
+            partial_path.unlink()
+            offset = 0
+
+    else:
+        offset = 0
+
+    # Tell the client where it should start sending.
+    send_message(client_socket, {
+        "type": "UPLOAD_READY",
+        "filename": filename,
+        "offset": offset
+    })
+
+    # Prepare SHA-256.
     sha256 = hashlib.sha256()
 
-    remaining = file_size
+    # If we are resuming, hash the existing partial data first.
+    if offset > 0:
+        with partial_path.open("rb") as file:
+            remaining_partial = offset
 
-    with output_path.open("wb") as file:
+            while remaining_partial > 0:
+                chunk_size = min(BUFFER_SIZE, remaining_partial)
+                chunk = file.read(chunk_size)
+
+                if not chunk:
+                    raise ConnectionError(
+                        "Unexpected end of partial file"
+                    )
+
+                sha256.update(chunk)
+                remaining_partial -= len(chunk)
+
+    remaining = file_size - offset
+
+    # Append new data to the partial file.
+    with partial_path.open("ab") as file:
         while remaining > 0:
             chunk_size = min(BUFFER_SIZE, remaining)
             chunk = receive_exact(client_socket, chunk_size)
@@ -61,6 +113,9 @@ def handle_upload(client_socket, message):
 
     if actual_hash == expected_hash:
         print("TRANSFER VERIFIED")
+
+        # Rename the partial file only after verification succeeds.
+        partial_path.replace(output_path)
 
         send_message(client_socket, {
             "type": "TRANSFER_OK",

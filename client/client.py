@@ -69,14 +69,39 @@ def upload_file(file_path):
 
         send_message(sock, message)
 
+        # Wait for the server to tell us where to start.
+        response = receive_message(sock)
+
+        if response.get("type") != "UPLOAD_READY":
+            print("Unexpected server response:", response)
+            return
+
+        offset = response.get("offset", 0)
+
+        if offset < 0 or offset > file_size:
+            print(f"Invalid resume offset received from server: {offset}")
+            return
+
+        if offset == 0:
+            print("Starting upload from the beginning")
+        else:
+            print(
+                f"Resuming upload from byte {offset} "
+                f"({format_bytes(offset)})"
+            )
+
         print(f"Uploading: {file_path.name}")
         print(f"Size: {format_bytes(file_size)}")
         print(f"SHA-256: {file_hash}")
 
-        bytes_sent = 0
+        bytes_sent = offset
+
         start_time = time.monotonic()
 
         with file_path.open("rb") as file:
+            # Skip the bytes that the server already has.
+            file.seek(offset)
+
             while True:
                 chunk = file.read(BUFFER_SIZE)
 
@@ -84,17 +109,26 @@ def upload_file(file_path):
                     break
 
                 sock.sendall(chunk)
-
                 bytes_sent += len(chunk)
 
                 elapsed = time.monotonic() - start_time
 
-                speed = bytes_sent / elapsed if elapsed > 0 else 0
-                percentage = (bytes_sent / file_size) * 100
+                speed = (
+                    (bytes_sent - offset) / elapsed
+                    if elapsed > 0
+                    else 0
+                )
+
+                percentage = (
+                    (bytes_sent / file_size) * 100
+                    if file_size > 0
+                    else 100
+                )
 
                 print(
                     f"\rProgress: {percentage:6.2f}% | "
-                    f"{format_bytes(bytes_sent)} / {format_bytes(file_size)} | "
+                    f"{format_bytes(bytes_sent)} / "
+                    f"{format_bytes(file_size)} | "
                     f"Speed: {format_bytes(speed)}/s",
                     end="",
                     flush=True,
@@ -106,8 +140,13 @@ def upload_file(file_path):
         print(f"Upload completed in {elapsed:.2f}s")
 
         if elapsed > 0:
-            average_speed = bytes_sent / elapsed
-            print(f"Average speed: {format_bytes(average_speed)}/s")
+            transferred_this_attempt = bytes_sent - offset
+            average_speed = transferred_this_attempt / elapsed
+
+            print(
+                f"Average speed: "
+                f"{format_bytes(average_speed)}/s"
+            )
 
         response = receive_message(sock)
 
@@ -172,7 +211,6 @@ def download_file(filename):
         with output_path.open("wb") as file:
             while remaining > 0:
                 chunk_size = min(BUFFER_SIZE, remaining)
-
                 chunk = receive_exact(sock, chunk_size)
 
                 file.write(chunk)
@@ -190,8 +228,10 @@ def download_file(filename):
                 )
 
                 percentage = (
-                    bytes_received / file_size
-                ) * 100
+                    (bytes_received / file_size) * 100
+                    if file_size > 0
+                    else 100
+                )
 
                 print(
                     f"\rProgress: {percentage:6.2f}% | "
@@ -203,7 +243,6 @@ def download_file(filename):
                 )
 
         elapsed = time.monotonic() - start_time
-
         actual_hash = sha256.hexdigest()
 
         print()
