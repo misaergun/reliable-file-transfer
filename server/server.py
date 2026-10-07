@@ -1,5 +1,6 @@
 import hashlib
 import socket
+import threading
 from pathlib import Path
 
 from common.protocol import send_message, receive_message, receive_exact
@@ -47,7 +48,6 @@ def handle_upload(client_socket, message):
     with output_path.open("wb") as file:
         while remaining > 0:
             chunk_size = min(BUFFER_SIZE, remaining)
-
             chunk = receive_exact(client_socket, chunk_size)
 
             file.write(chunk)
@@ -125,16 +125,7 @@ def handle_download(client_socket, message):
         print("Client reported a verification failure")
 
 
-def start_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    server_socket.bind((HOST, PORT))
-    server_socket.listen(1)
-
-    print(f"Server listening on {HOST}:{PORT}")
-
-    client_socket, client_address = server_socket.accept()
-
+def handle_client(client_socket, client_address):
     print(f"Client connected: {client_address}")
 
     try:
@@ -156,8 +147,44 @@ def start_server():
                 "message": "Unsupported operation"
             })
 
+    except Exception as error:
+        print(f"Client error ({client_address}): {error}")
+
     finally:
         client_socket.close()
+        print(f"Client disconnected: {client_address}")
+
+
+def start_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    server_socket.setsockopt(
+        socket.SOL_SOCKET,
+        socket.SO_REUSEADDR,
+        1
+    )
+
+    server_socket.bind((HOST, PORT))
+    server_socket.listen()
+
+    print(f"Server listening on {HOST}:{PORT}")
+
+    try:
+        while True:
+            client_socket, client_address = server_socket.accept()
+
+            client_thread = threading.Thread(
+                target=handle_client,
+                args=(client_socket, client_address),
+                daemon=True
+            )
+
+            client_thread.start()
+
+    except KeyboardInterrupt:
+        print("\nServer shutting down...")
+
+    finally:
         server_socket.close()
 
 
