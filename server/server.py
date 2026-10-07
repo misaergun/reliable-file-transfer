@@ -47,14 +47,7 @@ def calculate_sha256(file_path):
     return sha256.hexdigest()
 
 
-def validate_upload_message(message):
-    if not isinstance(message, dict):
-        return False, "Upload request must be a JSON object"
-
-    filename = message.get("filename")
-    file_size = message.get("size")
-    expected_hash = message.get("sha256")
-
+def validate_filename(filename):
     if not isinstance(filename, str):
         return False, "Filename must be a string"
 
@@ -68,6 +61,24 @@ def validate_upload_message(message):
 
     if Path(filename).name != filename:
         return False, "Path separators are not allowed in filename"
+
+    return True, None
+
+
+def validate_upload_message(message):
+    if not isinstance(message, dict):
+        return False, "Upload request must be a JSON object"
+
+    filename = message.get("filename")
+    file_size = message.get("size")
+    expected_hash = message.get("sha256")
+
+    valid_filename, filename_error = validate_filename(
+        filename
+    )
+
+    if not valid_filename:
+        return False, filename_error
 
     if not isinstance(file_size, int) or isinstance(file_size, bool):
         return False, "File size must be a non-negative integer"
@@ -438,7 +449,29 @@ def handle_upload(client_socket, message):
 
 
 def handle_download(client_socket, message):
-    filename = Path(message["filename"]).name
+    if not isinstance(message, dict):
+        send_message(client_socket, {
+            "type": "DOWNLOAD_FAILED",
+            "message": "Download request must be a JSON object"
+        })
+
+        return
+
+    filename = message.get("filename")
+
+    valid_filename, error_message = validate_filename(
+        filename
+    )
+
+    if not valid_filename:
+        send_message(client_socket, {
+            "type": "DOWNLOAD_FAILED",
+            "message": error_message
+        })
+
+        return
+
+    filename = Path(filename).name
     file_path = RECEIVED_DIR / filename
 
     print(f"Download requested: {filename}")

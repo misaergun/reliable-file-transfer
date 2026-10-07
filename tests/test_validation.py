@@ -1,6 +1,52 @@
 import pytest
 
-from server.server import validate_upload_message
+from server.server import (
+    validate_filename,
+    validate_upload_message,
+)
+
+
+def test_valid_filename():
+    valid, error = validate_filename("test.bin")
+
+    assert valid is True
+    assert error is None
+
+
+@pytest.mark.parametrize(
+    "filename, expected_error",
+    [
+        (
+            "",
+            "Filename cannot be empty",
+        ),
+        (
+            "   ",
+            "Filename cannot be empty",
+        ),
+        (
+            123,
+            "Filename must be a string",
+        ),
+        (
+            ".",
+            "Invalid filename",
+        ),
+        (
+            "..",
+            "Invalid filename",
+        ),
+        (
+            "../../secret.txt",
+            "Path separators are not allowed in filename",
+        ),
+    ],
+)
+def test_invalid_filenames(filename, expected_error):
+    valid, error = validate_filename(filename)
+
+    assert valid is False
+    assert error == expected_error
 
 
 def test_valid_upload_message():
