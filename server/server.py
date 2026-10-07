@@ -45,6 +45,49 @@ def calculate_sha256(file_path):
     return sha256.hexdigest()
 
 
+def validate_upload_message(message):
+    if not isinstance(message, dict):
+        return False, "Upload request must be a JSON object"
+
+    filename = message.get("filename")
+    file_size = message.get("size")
+    expected_hash = message.get("sha256")
+
+    if not isinstance(filename, str):
+        return False, "Filename must be a string"
+
+    filename = filename.strip()
+
+    if not filename:
+        return False, "Filename cannot be empty"
+
+    if filename in {".", ".."}:
+        return False, "Invalid filename"
+
+    if Path(filename).name != filename:
+        return False, "Path separators are not allowed in filename"
+
+    if not isinstance(file_size, int) or isinstance(file_size, bool):
+        return False, "File size must be a non-negative integer"
+
+    if file_size < 0:
+        return False, "File size cannot be negative"
+
+    if not isinstance(expected_hash, str):
+        return False, "SHA-256 must be a string"
+
+    if len(expected_hash) != 64:
+        return False, "SHA-256 must contain exactly 64 characters"
+
+    if any(
+        character not in "0123456789abcdefABCDEF"
+        for character in expected_hash
+    ):
+        return False, "SHA-256 contains invalid hexadecimal characters"
+
+    return True, None
+
+
 def load_partial_metadata(metadata_path):
     if not metadata_path.is_file():
         return None
@@ -111,9 +154,23 @@ def partial_metadata_matches(
 
 
 def handle_upload(client_socket, message):
+    valid, error_message = validate_upload_message(message)
+
+    if not valid:
+        print(
+            f"Invalid upload request: {error_message}"
+        )
+
+        send_message(client_socket, {
+            "type": "UPLOAD_FAILED",
+            "message": error_message
+        })
+
+        return
+
     filename = Path(message["filename"]).name
     file_size = message["size"]
-    expected_hash = message["sha256"]
+    expected_hash = message["sha256"].lower()
 
     output_path = RECEIVED_DIR / filename
     partial_path = RECEIVED_DIR / f"{filename}.part"
