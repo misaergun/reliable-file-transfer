@@ -687,3 +687,37 @@ def test_non_object_download_request_is_rejected():
             sock.close()
 
         stop_server(process)
+
+def test_server_shuts_down_cleanly_on_sigint():
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "server.server",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        wait_for_server()
+
+        process.send_signal(
+            __import__("signal").SIGINT
+        )
+
+        stdout, stderr = process.communicate(
+            timeout=5
+        )
+
+        assert process.returncode == 0
+
+        combined_output = stdout + stderr
+
+        assert "Server shutting down..." in combined_output
+
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
